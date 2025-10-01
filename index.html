@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Names — MVP</title>
+  <style>
+    :root{--brand:#0ea5e9;--ok:#4ade80;--bg:#0b1020;--card:#111831;--ink:#eef2ff;--muted:#aab4d4}
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(180deg,#0a0f1f,#0d1428 35%,#0a1226);color:var(--ink);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    header{position:fixed;top:0;left:0;right:0;z-index:10;backdrop-filter:blur(8px);background:linear-gradient(180deg,rgba(8,12,24,.98),rgba(8,12,24,.7));border-bottom:1px solid rgba(255,255,255,.08)}
+    .bar{display:flex;justify-content:space-between;align-items:center;padding:14px 16px}
+    h1{margin:0;font-weight:800;letter-spacing:.2px}
+    .wrap{max-width:800px;margin:0 auto;padding:88px 16px 90px}
+
+    input, textarea{width:100%;padding:1.05em .9em;margin:.35em 0;font-size:1.1em;border-radius:12px;border:1px solid rgba(255,255,255,.18);background:#0b1226;color:var(--ink);outline:none;resize:none}
+    input:focus, textarea:focus{border-color:var(--brand);box-shadow:0 0 0 4px rgba(14,165,233,.25)}
+    button{padding:1em 1.2em;margin:.35em 0;font-size:1.05em;border:none;border-radius:12px;cursor:pointer}
+    #save{background:linear-gradient(180deg,#0ea5e9,#0284c7);color:white}
+    #searchBtn{background:linear-gradient(180deg,#4ade80,#16a34a);color:white}
+    #exportBtn{background:#0f172a;color:#e2e8f0}
+    #resetBtn{background:#0f172a;color:#e2e8f0}
+    .ghost{background:transparent;border:1px solid rgba(255,255,255,.18)}
+
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    .card{background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:14px}
+
+    .item{border:1px solid rgba(255,255,255,.12);background:#0b1226;padding:12px;border-radius:12px;margin:.5em 0;display:grid;gap:6px}
+    .itemHead{display:flex;gap:10px;align-items:center}
+    .name{font-weight:700}
+    .meta{font-size:12px;color:var(--muted)}
+    .chips{display:flex;flex-wrap:wrap;gap:6px}
+    .chip{display:inline-block;padding:.2em .6em;border-radius:999px;border:1px solid rgba(255,255,255,.12);font-size:12px;color:#cbd5e1}
+
+    .tools{display:flex;gap:6px;margin-left:auto}
+    .btnSmall{padding:.5em .7em;font-size:.9em;border-radius:10px}
+    .danger{background:linear-gradient(180deg,#ef4444,#b91c1c);color:#fff}
+    .ok{background:#0f172a;color:#e2e8f0}
+
+    .hint{font-size:12px;color:var(--muted)}
+    .toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#0b1226;border:1px solid rgba(255,255,255,.18);padding:10px 14px;border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.35);opacity:0;pointer-events:none;transition:.25s}
+    .toast.show{opacity:1}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <h1>Names</h1>
+      <div class="hint">Lokal · Export/Import</div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="card" aria-label="Eingabebereich">
+      <div class="row">
+        <input id="field1" placeholder="Name eingeben oder Suchbegriff…" autocomplete="off" />
+        <textarea id="field2" rows="1" placeholder="Cues (Komma-getrennt, optional)" autocomplete="off"></textarea>
+        <input id="field3" placeholder="Familie/Haustiere (z. B. Sohn.Walter.2012, Hund.Truddi, Tochter.Mona.2012-08)" autocomplete="off" />
+      </div>
+      <div class="row">
+        <button id="save">Speichern</button>
+        <button id="searchBtn">Suche</button>
+        <button id="resetBtn">Reset</button>
+        <button id="exportBtn" class="ok">Export JSON</button>
+        <label for="importFile" class="ghost" style="padding:1em 1.2em;border-radius:12px;cursor:pointer">Import JSON</label>
+        <input id="importFile" type="file" accept="application/json" style="display:none" />
+        <button id="cancelEdit" class="ghost" style="display:none">Abbrechen</button>
+      </div>
+      <div id="stateHint" class="hint"></div>
+    </section>
+
+    <section class="card" aria-label="Ergebnisse">
+      <div id="list"></div>
+      <div id="empty" class="hint">Noch keine Einträge. Tipp: Name + 1–2 Cues eingeben und <b>Speichern</b>.</div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const KEY = 'names.v2'; // neue Version
+    const LEGACY_KEYS = ['names.v1','namensanker.v1','namensanker.v2'];
+    const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+    const els = {
+      f1: document.getElementById('field1'),
+      f2: document.getElementById('field2'),
+      f3: document.getElementById('field3'),
+      save: document.getElementById('save'),
+      search: document.getElementById('searchBtn'),
+      reset: document.getElementById('resetBtn'),
+      exportBtn: document.getElementById('exportBtn'),
+      importFile: document.getElementById('importFile'),
+      cancelEdit: document.getElementById('cancelEdit'),
+      list: document.getElementById('list'),
+      empty: document.getElementById('empty'),
+      toast: document.getElementById('toast'),
+      stateHint: document.getElementById('stateHint')
+    };
+
+    let editingId = null;
+
+    // --- Storage helpers ---
+    function load(){
+      try{
+        const data = JSON.parse(localStorage.getItem(KEY));
+        if(Array.isArray(data)) return data;
+      }catch{}
+      // Legacy fallback: if current is empty, try old keys once
+      for(const k of LEGACY_KEYS){
+        try{
+          const d = JSON.parse(localStorage.getItem(k)||'null');
+          if(Array.isArray(d) && d.length){
+            // migrate structure (ensure relations)
+            const migrated = d.map(it=>({ id: it.id||uid(), name: String(it.name||'').trim(), cues: Array.isArray(it.cues)? it.cues: [], relations: Array.isArray(it.relations)? it.relations: [], createdAt: it.createdAt || new Date().toISOString()}));
+            localStorage.setItem(KEY, JSON.stringify(migrated));
+            return migrated;
+          }
+        }catch{}
+      }
+      return [];
+    }
+    function saveAll(items){ localStorage.setItem(KEY, JSON.stringify(items)); }
+
+    // --- Textarea autoresize ---
+    function autoResizeTA(el){ el.style.height='auto'; el.style.height = (el.scrollHeight)+ 'px'; }
+    els.f2.addEventListener('input', ()=>autoResizeTA(els.f2));
+    setTimeout(()=>autoResizeTA(els.f2),0);
+
+    // --- Parsing helpers ---
+    function parseCues(s){ return (s||'').split(/[,;]+/).map(x=>x.trim()).filter(Boolean).slice(0,12); }
+
+    // relation token: Typ.Name.Datum? (YYYY | YYYY-MM | YYYY-MM-DD)
+    function parseRelations(s){
+      const out=[]; if(!s) return out;
+      for(const raw of s.split(/[,;]+/)){ const t = raw.trim(); if(!t) continue;
+        const parts = t.split('.').map(x=>x.trim()).filter(Boolean);
+        if(parts.length>=1){
+          const type = (parts[0]||'').toLowerCase();
+          const name = parts[1]||'';
+          const date = parts[2]||'';
+          out.push({type,name,date});
+        }
+      }
+      return out;
+    }
+
+    function calcAge(dateStr){
+      if(!dateStr) return null;
+      const m = /^\d{4}(-\d{2}){0,2}$/.test(dateStr) ? dateStr.split('-').map(x=>parseInt(x,10)) : null;
+      if(!m) return null;
+      const [Y, M=1, D=1] = m; // fehlende Angaben: erster Tag/Monat
+      const today = new Date();
+      let age = today.getFullYear() - Y;
+      const mNow = today.getMonth()+1, dNow = today.getDate();
+      if(mNow < M || (mNow===M && dNow < D)) age--;
+      return age;
+    }
+
+    function render(q=''){
+      const items=load();
+      const ql=(q||'').toLowerCase();
+      const filtered = items.filter(it=>{
+        const relTxt = (it.relations||[]).map(r=>`${r.type} ${r.name} ${r.date||''}`).join(' ');
+        const text=[it.name,...(it.cues||[]), relTxt].join(' ').toLowerCase();
+        return !ql || text.includes(ql);
+      });
+      els.list.innerHTML='';
+      if(filtered.length===0){ els.empty.style.display='block'; return; } else { els.empty.style.display='none'; }
+      for(const it of filtered){
+        const row=document.createElement('div'); row.className='item';
+        const head=document.createElement('div'); head.className='itemHead';
+        const name=document.createElement('div'); name.className='name'; name.textContent=it.name;
+        const tools=document.createElement('div'); tools.className='tools';
+        const edit=document.createElement('button'); edit.className='btnSmall ok'; edit.textContent='Bearbeiten'; edit.onclick=()=> beginEdit(it.id);
+        const del=document.createElement('button'); del.className='btnSmall danger'; del.textContent='X'; del.title='Löschen';
+        del.onclick=()=>{ if(confirm('Eintrag löschen?')){ removeItem(it.id); } };
+        tools.append(edit,del);
+        head.append(name,tools);
+
+        const cues=document.createElement('div'); cues.className='chips';
+        (it.cues||[]).forEach(c=>{ const chip=document.createElement('span'); chip.className='chip'; chip.textContent=c; cues.append(chip); });
+
+        const rels=document.createElement('div'); rels.className='chips';
+        (it.relations||[]).forEach(r=>{
+          const chip=document.createElement('span'); chip.className='chip';
+          const age = calcAge(r.date);
+          const labelType = r.type? (r.type[0].toUpperCase()+r.type.slice(1)) : 'Bezug';
+          chip.textContent = `${labelType}${r.name? ' '+r.name: ''}${age!=null? ' ('+age+')':''}`;
+          rels.append(chip);
+        });
+
+        const created=document.createElement('div'); created.className='meta'; created.textContent = 'erstellt: ' + new Date(it.createdAt||Date.now()).toLocaleString();
+
+        row.append(head,cues,rels,created);
+        els.list.append(row);
+      }
+    }
+
+    function toast(msg){ els.toast.textContent=msg; els.toast.classList.add('show'); clearTimeout(window.__t); window.__t=setTimeout(()=>els.toast.classList.remove('show'),1600); }
+
+    function addItem(){
+      const name=els.f1.value.trim(); if(!name){ toast('Name fehlt'); els.f1.focus(); return; }
+      const cues=parseCues(els.f2.value);
+      const relations=parseRelations(els.f3.value);
+      const items=load();
+      items.unshift({id:uid(), name, cues, relations, createdAt:new Date().toISOString()});
+      saveAll(items); clearForm(); render(); toast('Gespeichert');
+    }
+
+    function beginEdit(id){
+      const items=load(); const it=items.find(x=>x.id===id); if(!it) return;
+      editingId=id; els.f1.value=it.name; els.f2.value=(it.cues||[]).join(', '); els.f3.value=(it.relations||[]).map(r=>[r.type,r.name,r.date].filter(Boolean).join('.')).join(', ');
+      autoResizeTA(els.f2);
+      els.save.textContent='Änderungen speichern'; els.cancelEdit.style.display='inline-block';
+      els.stateHint.textContent='Bearbeite: '+it.name;
+      window.scrollTo({top:0,behavior:'smooth'});
+    }
+
+    function applyEdit(){
+      const items=load(); const it=items.find(x=>x.id===editingId); if(!it){ cancelEdit(); return; }
+      const name=els.f1.value.trim(); if(!name){ toast('Name fehlt'); return; }
+      it.name=name; it.cues=parseCues(els.f2.value); it.relations=parseRelations(els.f3.value);
+      saveAll(items); cancelEdit(); render(); toast('Aktualisiert');
+    }
+
+    function cancelEdit(){ editingId=null; els.save.textContent='Speichern'; els.cancelEdit.style.display='none'; els.stateHint.textContent=''; clearForm(); }
+
+    function clearForm(){ els.f1.value=''; els.f2.value=''; els.f3.value=''; autoResizeTA(els.f2); }
+
+    function removeItem(id){ const items=load().filter(x=>x.id!==id); saveAll(items); render(); toast('Gelöscht'); }
+
+    function doSearch(){ const q = els.f1.value.trim() || els.f2.value.trim() || els.f3.value.trim(); render(q); }
+
+    function exportJSON(){
+      const data = JSON.stringify(load(), null, 2);
+      const blob = new Blob([data], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download='names.json'; a.click(); URL.revokeObjectURL(url);
+    }
+
+    function importJSON(file){
+      const reader = new FileReader();
+      reader.onload = e => {
+        try{
+          const incoming = JSON.parse(e.target.result);
+          if(!Array.isArray(incoming)) throw new Error('Ungültiges Format');
+          const existing = load();
+          const byName = new Map(existing.map(x=>[String(x.name||'').toLowerCase(), x]));
+          for(const it of incoming){
+            if(!it || !it.name) continue;
+            const key = String(it.name).toLowerCase();
+            if(byName.has(key)){
+              const dst = byName.get(key);
+              dst.cues = Array.from(new Set([...(dst.cues||[]), ...((it.cues)||[])]));
+              const rels = Array.isArray(it.relations)? it.relations: [];
+              dst.relations = Array.from(new Map([...(dst.relations||[]), ...rels].map(r=>[JSON.stringify(r), r]))).map(e=>e[1]);
+            }else{
+              existing.push({id:uid(), name:String(it.name), cues:Array.isArray(it.cues)? it.cues.filter(Boolean):[], relations:Array.isArray(it.relations)? it.relations:[], createdAt:it.createdAt||new Date().toISOString()});
+            }
+          }
+          saveAll(existing); render(); toast('Import abgeschlossen');
+        }catch(err){ alert('Import fehlgeschlagen: '+err.message); }
+      };
+      reader.readAsText(file);
+    }
+
+    // wire
+    els.save.addEventListener('click', ()=> editingId? applyEdit() : addItem());
+    els.search.addEventListener('click', doSearch);
+    els.reset.addEventListener('click', ()=>{ cancelEdit(); clearForm(); toast('Zurückgesetzt'); });
+    els.exportBtn.addEventListener('click', exportJSON);
+    els.importFile.addEventListener('change', e=>{ if(e.target.files?.[0]) importJSON(e.target.files[0]); e.target.value=''; });
+
+    // Enter = speichern, Shift+Enter = Suche; Esc = Reset
+    document.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter' && !e.shiftKey) { e.preventDefault(); editingId? applyEdit(): addItem(); }
+      if(e.key==='Enter' && e.shiftKey){ e.preventDefault(); doSearch(); }
+      if(e.key==='Escape'){ e.preventDefault(); cancelEdit(); clearForm(); }
+    });
+
+    render();
+  </script>
+</body>
+</html>
+
