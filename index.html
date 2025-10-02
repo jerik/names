@@ -27,6 +27,7 @@
 
     .item{border:1px solid rgba(255,255,255,.12);background:#0b1226;padding:12px;border-radius:12px;margin:.5em 0;display:grid;gap:6px}
     .itemHead{display:flex;gap:10px;align-items:center}
+    .cal{margin-right:6px}
     .name{font-weight:700}
     .name.month{color:var(--blue)}
     .meta{font-size:12px;color:var(--muted)}
@@ -84,7 +85,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script>
-    const KEY = 'names.v3'; // neue Version mit Geburtsdatum
+    const KEY = 'names.v3';
     const LEGACY_KEYS = ['names.v2','names.v1','namensanker.v1','namensanker.v2'];
     const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,8);
     const els = {
@@ -111,19 +112,11 @@
         const data = JSON.parse(localStorage.getItem(KEY));
         if(Array.isArray(data)) return data;
       }catch{}
-      // Legacy fallback
       for(const k of LEGACY_KEYS){
         try{
           const d = JSON.parse(localStorage.getItem(k)||'null');
           if(Array.isArray(d) && d.length){
-            const migrated = d.map(it=>({
-              id: it.id||uid(),
-              name: String(it.name||'').trim(),
-              birth: it.birth||'',
-              cues: Array.isArray(it.cues)? it.cues: [],
-              relations: Array.isArray(it.relations)? it.relations: [],
-              createdAt: it.createdAt || new Date().toISOString()
-            }));
+            const migrated = d.map(it=>({ id: it.id||uid(), name: String(it.name||'').trim(), birth: it.birth||'', cues: Array.isArray(it.cues)? it.cues: [], relations: Array.isArray(it.relations)? it.relations: [], createdAt: it.createdAt || new Date().toISOString()}));
             localStorage.setItem(KEY, JSON.stringify(migrated));
             return migrated;
           }
@@ -141,7 +134,6 @@
     // --- Parsing helpers ---
     function parseCues(s){ return (s||'').split(/[,;]+/).map(x=>x.trim()).filter(Boolean).slice(0,12); }
 
-    // relation token: Typ.Name.Datum? (YYYY | YYYY-MM | YYYY-MM-DD)
     function parseRelations(s){
       const out=[]; if(!s) return out;
       for(const raw of s.split(/[,;]+/)){ const t = raw.trim(); if(!t) continue;
@@ -170,24 +162,22 @@
       if(!ok) return null;
       const [Y, M=1, D=1] = dateStr.split('-').map(n=>parseInt(n,10));
       const today = new Date();
+      if(Y > today.getFullYear()) return null; // Zukunft ignorieren
       let age = today.getFullYear() - Y;
       const mNow = today.getMonth()+1, dNow = today.getDate();
       if(M && (mNow < M || (mNow===M && D && dNow < D))) age--;
+      if(age < 0 || age > 140) return null; // unrealistisch -> nicht anzeigen
       return age;
     }
 
     function daysUntilNextBirthday(dateStr){
-      // requires at least month & day
       if(!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
       const [, M, D] = dateStr.split('-').map(n=>parseInt(n,10));
       const now = new Date();
-      const thisYear = now.getFullYear();
-      let next = new Date(thisYear, M-1, D);
-      if(next.setHours(0,0,0,0), next < new Date(now.getFullYear(), now.getMonth(), now.getDate())){
-        next = new Date(thisYear+1, M-1, D);
-      }
-      const ms = next - new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      return Math.round(ms / 86400000);
+      const baseToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      let next = new Date(now.getFullYear(), M-1, D);
+      if(next < baseToday){ next = new Date(now.getFullYear()+1, M-1, D); }
+      const ms = next - baseToday; return Math.round(ms / 86400000);
     }
 
     function birthStatus(birth){
@@ -195,9 +185,7 @@
       const today = new Date();
       const mNow = today.getMonth()+1, dNow = today.getDate();
       const parts = birth.split('-').map(n=>parseInt(n,10));
-      const Y = parts[0];
-      const M = parts[1];
-      const D = parts[2];
+      const M = parts[1]; const D = parts[2];
       const age = calcAge(birth);
       let monthHit = false, badge = null;
       if(M){ monthHit = (M === mNow); }
@@ -221,29 +209,32 @@
       for(const it of filtered){
         const row=document.createElement('div'); row.className='item';
         const head=document.createElement('div'); head.className='itemHead';
-        const name=document.createElement('div'); name.className='name'; name.textContent=it.name;
+
         const bs = birthStatus(it.birth||'');
+        const calIcon = document.createElement('span');
+        if(it.birth){ calIcon.className='cal'; calIcon.textContent='📅'; head.append(calIcon); }
+
+        const name=document.createElement('div'); name.className='name';
+        let label = it.name;
+        if(bs?.age!=null){ label += ` (${bs.age})`; }
+        name.textContent = label;
         if(bs?.monthHit) name.classList.add('month');
+
         const tools=document.createElement('div'); tools.className='tools';
         const edit=document.createElement('button'); edit.className='btnSmall ok'; edit.textContent='Bearbeiten'; edit.onclick=()=> beginEdit(it.id);
         const del=document.createElement('button'); del.className='btnSmall danger'; del.textContent='X'; del.title='Löschen';
         del.onclick=()=>{ if(confirm('Eintrag löschen?')){ removeItem(it.id); } };
         tools.append(edit,del);
+
         head.append(name,tools);
 
         const line2=document.createElement('div'); line2.className='chips';
-        // Age chip (Person)
-        if(bs?.age!=null){ const ageChip=document.createElement('span'); ageChip.className='chip'; ageChip.textContent = `Alter ${bs.age}`; line2.append(ageChip); }
-        // Birthday badge (countdown)
         if(bs?.badge){ const b=document.createElement('span'); b.className='bday '+bs.badge.cls; b.textContent=bs.badge.text; line2.append(b); }
-        // Birth raw (optional display)
         if(it.birth){ const born=document.createElement('span'); born.className='chip'; born.textContent = `geb. ${it.birth}`; line2.append(born); }
 
-        // Cues
         const cues=document.createElement('div'); cues.className='chips';
         (it.cues||[]).forEach(c=>{ const chip=document.createElement('span'); chip.className='chip'; chip.textContent=c; cues.append(chip); });
 
-        // Relations with age
         const rels=document.createElement('div'); rels.className='chips';
         (it.relations||[]).forEach(r=>{
           const chip=document.createElement('span'); chip.className='chip';
@@ -331,7 +322,6 @@
           saveAll(existing); render(); toast('Import abgeschlossen');
         }catch(err){ alert('Import fehlgeschlagen: '+err.message); }
       };
-      // explizit UTF‑8, um Umlaute korrekt zu lesen
       reader.readAsText(file, 'UTF-8');
     }
 
@@ -342,7 +332,6 @@
     els.exportBtn.addEventListener('click', exportJSON);
     els.importFile.addEventListener('change', e=>{ if(e.target.files?.[0]) importJSON(e.target.files[0]); e.target.value=''; });
 
-    // Enter = speichern, Shift+Enter = Suche; Esc = Reset
     document.addEventListener('keydown', (e)=>{
       if(e.key==='Enter' && !e.shiftKey) { e.preventDefault(); editingId? applyEdit(): addItem(); }
       if(e.key==='Enter' && e.shiftKey){ e.preventDefault(); doSearch(); }
