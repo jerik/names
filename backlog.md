@@ -1,6 +1,8 @@
 # next steps
-- Umlaut handling
-- besser export, download. Vielleicht nicht als blob?. Ich kann den auf dem iphone nicht richtig speichern. 
+
+# 2025-10-02 Done
+- Umlaut handling beim import und export
+- Geburtstag für Kontakt hinterlegen. Gleichers Schema. Optional hinter den namen mit komma getrennt
 
 # 2025-09-30 2249 Done
 - Reset möglichkeit für die Eingabefelder. Der reset entleert alle felder

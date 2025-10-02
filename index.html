@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Names — MVP</title>
   <style>
-    :root{--brand:#0ea5e9;--ok:#4ade80;--bg:#0b1020;--card:#111831;--ink:#eef2ff;--muted:#aab4d4}
+    :root{--brand:#0ea5e9;--ok:#4ade80;--bg:#0b1020;--card:#111831;--ink:#eef2ff;--muted:#aab4d4;--blue:#60a5fa;--green:#22c55e;--yellow:#f59e0b;--red:#ef4444}
     *{box-sizing:border-box}
     body{margin:0;background:linear-gradient(180deg,#0a0f1f,#0d1428 35%,#0a1226);color:var(--ink);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial}
     header{position:fixed;top:0;left:0;right:0;z-index:10;backdrop-filter:blur(8px);background:linear-gradient(180deg,rgba(8,12,24,.98),rgba(8,12,24,.7));border-bottom:1px solid rgba(255,255,255,.08)}
@@ -28,6 +28,7 @@
     .item{border:1px solid rgba(255,255,255,.12);background:#0b1226;padding:12px;border-radius:12px;margin:.5em 0;display:grid;gap:6px}
     .itemHead{display:flex;gap:10px;align-items:center}
     .name{font-weight:700}
+    .name.month{color:var(--blue)}
     .meta{font-size:12px;color:var(--muted)}
     .chips{display:flex;flex-wrap:wrap;gap:6px}
     .chip{display:inline-block;padding:.2em .6em;border-radius:999px;border:1px solid rgba(255,255,255,.12);font-size:12px;color:#cbd5e1}
@@ -36,6 +37,11 @@
     .btnSmall{padding:.5em .7em;font-size:.9em;border-radius:10px}
     .danger{background:linear-gradient(180deg,#ef4444,#b91c1c);color:#fff}
     .ok{background:#0f172a;color:#e2e8f0}
+
+    .bday{display:inline-flex;align-items:center;gap:6px;padding:.2em .6em;border-radius:999px;border:1px solid rgba(255,255,255,.12);font-size:12px}
+    .bday.today{background:rgba(34,197,94,.15);color:var(--green)}
+    .bday.soon1{background:rgba(245,158,11,.15);color:var(--yellow)}
+    .bday.soon2{background:rgba(239,68,68,.15);color:var(--red)}
 
     .hint{font-size:12px;color:var(--muted)}
     .toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#0b1226;border:1px solid rgba(255,255,255,.18);padding:10px 14px;border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.35);opacity:0;pointer-events:none;transition:.25s}
@@ -53,7 +59,7 @@
   <main class="wrap">
     <section class="card" aria-label="Eingabebereich">
       <div class="row">
-        <input id="field1" placeholder="Name eingeben oder Suchbegriff…" autocomplete="off" />
+        <input id="field1" placeholder="Name, optional Geburtsdatum (z. B. Anna, 1990-07-15 | 1990-07 | 1990) oder Suchbegriff…" autocomplete="off" />
         <textarea id="field2" rows="1" placeholder="Cues (Komma-getrennt, optional)" autocomplete="off"></textarea>
         <input id="field3" placeholder="Familie/Haustiere (z. B. Sohn.Walter.2012, Hund.Truddi, Tochter.Mona.2012-08)" autocomplete="off" />
       </div>
@@ -71,15 +77,15 @@
 
     <section class="card" aria-label="Ergebnisse">
       <div id="list"></div>
-      <div id="empty" class="hint">Noch keine Einträge. Tipp: Name + 1–2 Cues eingeben und <b>Speichern</b>.</div>
+      <div id="empty" class="hint">Noch keine Einträge. Tipp: Name (+ Geburtsdatum) und 1–2 Cues eingeben und <b>Speichern</b>.</div>
     </section>
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script>
-    const KEY = 'names.v2'; // neue Version
-    const LEGACY_KEYS = ['names.v1','namensanker.v1','namensanker.v2'];
+    const KEY = 'names.v3'; // neue Version mit Geburtsdatum
+    const LEGACY_KEYS = ['names.v2','names.v1','namensanker.v1','namensanker.v2'];
     const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,8);
     const els = {
       f1: document.getElementById('field1'),
@@ -105,13 +111,19 @@
         const data = JSON.parse(localStorage.getItem(KEY));
         if(Array.isArray(data)) return data;
       }catch{}
-      // Legacy fallback: if current is empty, try old keys once
+      // Legacy fallback
       for(const k of LEGACY_KEYS){
         try{
           const d = JSON.parse(localStorage.getItem(k)||'null');
           if(Array.isArray(d) && d.length){
-            // migrate structure (ensure relations)
-            const migrated = d.map(it=>({ id: it.id||uid(), name: String(it.name||'').trim(), cues: Array.isArray(it.cues)? it.cues: [], relations: Array.isArray(it.relations)? it.relations: [], createdAt: it.createdAt || new Date().toISOString()}));
+            const migrated = d.map(it=>({
+              id: it.id||uid(),
+              name: String(it.name||'').trim(),
+              birth: it.birth||'',
+              cues: Array.isArray(it.cues)? it.cues: [],
+              relations: Array.isArray(it.relations)? it.relations: [],
+              createdAt: it.createdAt || new Date().toISOString()
+            }));
             localStorage.setItem(KEY, JSON.stringify(migrated));
             return migrated;
           }
@@ -144,16 +156,56 @@
       return out;
     }
 
+    // Name + optional birth after comma (YYYY | YYYY-MM | YYYY-MM-DD)
+    function parseNameAndBirth(s){
+      const [nameRaw, birthRaw] = String(s||'').split(',').map(x=>x.trim());
+      const name = (nameRaw||'').replace(/\s+/g,' ').trim();
+      const birth = /^\d{4}(?:-\d{2}){0,2}$/.test(birthRaw||'') ? birthRaw : '';
+      return {name, birth};
+    }
+
     function calcAge(dateStr){
       if(!dateStr) return null;
-      const m = /^\d{4}(-\d{2}){0,2}$/.test(dateStr) ? dateStr.split('-').map(x=>parseInt(x,10)) : null;
-      if(!m) return null;
-      const [Y, M=1, D=1] = m; // fehlende Angaben: erster Tag/Monat
+      const ok = /^\d{4}(?:-\d{2}){0,2}$/.test(dateStr);
+      if(!ok) return null;
+      const [Y, M=1, D=1] = dateStr.split('-').map(n=>parseInt(n,10));
       const today = new Date();
       let age = today.getFullYear() - Y;
       const mNow = today.getMonth()+1, dNow = today.getDate();
-      if(mNow < M || (mNow===M && dNow < D)) age--;
+      if(M && (mNow < M || (mNow===M && D && dNow < D))) age--;
       return age;
+    }
+
+    function daysUntilNextBirthday(dateStr){
+      // requires at least month & day
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+      const [, M, D] = dateStr.split('-').map(n=>parseInt(n,10));
+      const now = new Date();
+      const thisYear = now.getFullYear();
+      let next = new Date(thisYear, M-1, D);
+      if(next.setHours(0,0,0,0), next < new Date(now.getFullYear(), now.getMonth(), now.getDate())){
+        next = new Date(thisYear+1, M-1, D);
+      }
+      const ms = next - new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      return Math.round(ms / 86400000);
+    }
+
+    function birthStatus(birth){
+      if(!birth) return null;
+      const today = new Date();
+      const mNow = today.getMonth()+1, dNow = today.getDate();
+      const parts = birth.split('-').map(n=>parseInt(n,10));
+      const Y = parts[0];
+      const M = parts[1];
+      const D = parts[2];
+      const age = calcAge(birth);
+      let monthHit = false, badge = null;
+      if(M){ monthHit = (M === mNow); }
+      const days = daysUntilNextBirthday(birth);
+      if(days===0) badge = {cls:'today', text:'🎂 Heute'};
+      else if(days===1) badge = {cls:'soon1', text:'🎂 1 Tag'};
+      else if(days===2) badge = {cls:'soon2', text:'🎂 2 Tage'};
+      return {age, monthHit, badge};
     }
 
     function render(q=''){
@@ -161,7 +213,7 @@
       const ql=(q||'').toLowerCase();
       const filtered = items.filter(it=>{
         const relTxt = (it.relations||[]).map(r=>`${r.type} ${r.name} ${r.date||''}`).join(' ');
-        const text=[it.name,...(it.cues||[]), relTxt].join(' ').toLowerCase();
+        const text=[it.name, it.birth||'', ...(it.cues||[]), relTxt].join(' ').toLowerCase();
         return !ql || text.includes(ql);
       });
       els.list.innerHTML='';
@@ -170,6 +222,8 @@
         const row=document.createElement('div'); row.className='item';
         const head=document.createElement('div'); head.className='itemHead';
         const name=document.createElement('div'); name.className='name'; name.textContent=it.name;
+        const bs = birthStatus(it.birth||'');
+        if(bs?.monthHit) name.classList.add('month');
         const tools=document.createElement('div'); tools.className='tools';
         const edit=document.createElement('button'); edit.className='btnSmall ok'; edit.textContent='Bearbeiten'; edit.onclick=()=> beginEdit(it.id);
         const del=document.createElement('button'); del.className='btnSmall danger'; del.textContent='X'; del.title='Löschen';
@@ -177,9 +231,19 @@
         tools.append(edit,del);
         head.append(name,tools);
 
+        const line2=document.createElement('div'); line2.className='chips';
+        // Age chip (Person)
+        if(bs?.age!=null){ const ageChip=document.createElement('span'); ageChip.className='chip'; ageChip.textContent = `Alter ${bs.age}`; line2.append(ageChip); }
+        // Birthday badge (countdown)
+        if(bs?.badge){ const b=document.createElement('span'); b.className='bday '+bs.badge.cls; b.textContent=bs.badge.text; line2.append(b); }
+        // Birth raw (optional display)
+        if(it.birth){ const born=document.createElement('span'); born.className='chip'; born.textContent = `geb. ${it.birth}`; line2.append(born); }
+
+        // Cues
         const cues=document.createElement('div'); cues.className='chips';
         (it.cues||[]).forEach(c=>{ const chip=document.createElement('span'); chip.className='chip'; chip.textContent=c; cues.append(chip); });
 
+        // Relations with age
         const rels=document.createElement('div'); rels.className='chips';
         (it.relations||[]).forEach(r=>{
           const chip=document.createElement('span'); chip.className='chip';
@@ -191,7 +255,7 @@
 
         const created=document.createElement('div'); created.className='meta'; created.textContent = 'erstellt: ' + new Date(it.createdAt||Date.now()).toLocaleString();
 
-        row.append(head,cues,rels,created);
+        row.append(head,line2,cues,rels,created);
         els.list.append(row);
       }
     }
@@ -199,17 +263,21 @@
     function toast(msg){ els.toast.textContent=msg; els.toast.classList.add('show'); clearTimeout(window.__t); window.__t=setTimeout(()=>els.toast.classList.remove('show'),1600); }
 
     function addItem(){
-      const name=els.f1.value.trim(); if(!name){ toast('Name fehlt'); els.f1.focus(); return; }
+      const {name, birth} = parseNameAndBirth(els.f1.value);
+      if(!name){ toast('Name fehlt'); els.f1.focus(); return; }
       const cues=parseCues(els.f2.value);
       const relations=parseRelations(els.f3.value);
       const items=load();
-      items.unshift({id:uid(), name, cues, relations, createdAt:new Date().toISOString()});
+      items.unshift({id:uid(), name, birth, cues, relations, createdAt:new Date().toISOString()});
       saveAll(items); clearForm(); render(); toast('Gespeichert');
     }
 
     function beginEdit(id){
       const items=load(); const it=items.find(x=>x.id===id); if(!it) return;
-      editingId=id; els.f1.value=it.name; els.f2.value=(it.cues||[]).join(', '); els.f3.value=(it.relations||[]).map(r=>[r.type,r.name,r.date].filter(Boolean).join('.')).join(', ');
+      editingId=id;
+      els.f1.value = it.name + (it.birth? ", "+it.birth : "");
+      els.f2.value=(it.cues||[]).join(', ');
+      els.f3.value=(it.relations||[]).map(r=>[r.type,r.name,r.date].filter(Boolean).join('.')).join(', ');
       autoResizeTA(els.f2);
       els.save.textContent='Änderungen speichern'; els.cancelEdit.style.display='inline-block';
       els.stateHint.textContent='Bearbeite: '+it.name;
@@ -218,8 +286,9 @@
 
     function applyEdit(){
       const items=load(); const it=items.find(x=>x.id===editingId); if(!it){ cancelEdit(); return; }
-      const name=els.f1.value.trim(); if(!name){ toast('Name fehlt'); return; }
-      it.name=name; it.cues=parseCues(els.f2.value); it.relations=parseRelations(els.f3.value);
+      const nb = parseNameAndBirth(els.f1.value);
+      if(!nb.name){ toast('Name fehlt'); return; }
+      it.name=nb.name; it.birth=nb.birth; it.cues=parseCues(els.f2.value); it.relations=parseRelations(els.f3.value);
       saveAll(items); cancelEdit(); render(); toast('Aktualisiert');
     }
 
@@ -233,7 +302,7 @@
 
     function exportJSON(){
       const data = JSON.stringify(load(), null, 2);
-      const blob = new Blob([data], {type:'application/json'});
+      const blob = new Blob([data], {type:'application/json;charset=utf-8'});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href=url; a.download='names.json'; a.click(); URL.revokeObjectURL(url);
     }
@@ -251,17 +320,19 @@
             const key = String(it.name).toLowerCase();
             if(byName.has(key)){
               const dst = byName.get(key);
+              dst.birth = dst.birth || it.birth || '';
               dst.cues = Array.from(new Set([...(dst.cues||[]), ...((it.cues)||[])]));
               const rels = Array.isArray(it.relations)? it.relations: [];
               dst.relations = Array.from(new Map([...(dst.relations||[]), ...rels].map(r=>[JSON.stringify(r), r]))).map(e=>e[1]);
             }else{
-              existing.push({id:uid(), name:String(it.name), cues:Array.isArray(it.cues)? it.cues.filter(Boolean):[], relations:Array.isArray(it.relations)? it.relations:[], createdAt:it.createdAt||new Date().toISOString()});
+              existing.push({id:uid(), name:String(it.name), birth: it.birth||'', cues:Array.isArray(it.cues)? it.cues.filter(Boolean):[], relations:Array.isArray(it.relations)? it.relations:[], createdAt:it.createdAt||new Date().toISOString()});
             }
           }
           saveAll(existing); render(); toast('Import abgeschlossen');
         }catch(err){ alert('Import fehlgeschlagen: '+err.message); }
       };
-      reader.readAsText(file);
+      // explizit UTF‑8, um Umlaute korrekt zu lesen
+      reader.readAsText(file, 'UTF-8');
     }
 
     // wire
