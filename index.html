@@ -335,6 +335,33 @@
       reader.readAsText(file, 'UTF-8');
     }
 
+    // Expose helpers for reuse (e.g. tests)
+    window.NamesApp = {
+      KEY,
+      LEGACY_KEYS,
+      uid,
+      load,
+      saveAll,
+      autoResizeTA,
+      parseCues,
+      parseRelations,
+      parseNameAndBirth,
+      calcAge,
+      daysUntilNextBirthday,
+      birthStatus,
+      render,
+      toast,
+      addItem,
+      beginEdit,
+      applyEdit,
+      cancelEdit,
+      clearForm,
+      removeItem,
+      doSearch,
+      exportJSON,
+      importJSON
+    };
+
     // wire
     els.save.addEventListener('click', ()=> editingId? applyEdit() : addItem());
     els.search.addEventListener('click', doSearch);
